@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 from pathlib import Path
+from importlib.metadata import version
 
 import numpy as np
 import pandas as pd
@@ -26,6 +28,40 @@ RAIZ = Path(__file__).resolve().parent
 ENTRENAMIENTO = (2019, 2020)
 VALIDACION = 2021
 TEST = 2022
+# Revisión auditada del código numérico (previa al cierre documental).
+# No se puede almacenar dentro de un commit su propio SHA: el hash cambiaría.
+# Véase docs/ENTORNO.md y la explicación de procedencia de esta revisión.
+COMMIT_CODIGO_FUENTE = "32705235"
+DEPENDENCIAS = ("numpy", "pandas", "scikit-learn", "matplotlib", "PyYAML")
+
+
+def _validar_versiones_fijadas() -> None:
+    """Nunca generar reportes 'oficiales' con librerías de otra versión."""
+    for linea in (RAIZ / "requirements.txt").read_text(encoding="utf-8").splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("#"):
+            continue
+        nombre, separador, esperada = linea.partition("==")
+        if separador != "==":
+            raise ValueError(f"Dependencia sin fijar exactamente: {linea}")
+        observada = version(nombre)
+        if observada != esperada:
+            raise RuntimeError(
+                f"Versión incompatible de {nombre}: instalada {observada}, "
+                f"requerida {esperada}. Instala requirements.txt antes de generar."
+            )
+
+
+def _entorno_ejecucion() -> dict:
+    """Metadatos deterministas del entorno de cómputo; sin fechas variables."""
+    return {
+        "python": platform.python_version(),
+        "sistema": platform.system(),
+        "arquitectura": platform.machine(),
+        "librerias": {nombre: version(nombre) for nombre in DEPENDENCIAS},
+        "commit_codigo_fuente": COMMIT_CODIGO_FUENTE,
+        "nota_commit": "Revisión auditada del código predictivo; no es el SHA del commit que contiene este JSON.",
+    }
 
 
 def _generar_resumen(
@@ -140,6 +176,7 @@ se requiere prueba de uplift o experimento para medir impacto incremental.
 
 
 def ejecutar(semilla: int = SEMILLA, prestamos_por_cosecha: int = 2600) -> dict:
+    _validar_versiones_fijadas()
     datos = RAIZ / "data"
     informes = RAIZ / "reports"
     datos.mkdir(parents=True, exist_ok=True)
@@ -219,6 +256,7 @@ def ejecutar(semilla: int = SEMILLA, prestamos_por_cosecha: int = 2600) -> dict:
 
     reporte = {
         "aviso": "SIMULACION. Datos sintéticos; ninguna métrica corresponde a clientes reales.",
+        "entorno": _entorno_ejecucion(),
         "semilla": semilla,
         "prestamos_por_cosecha": prestamos_por_cosecha,
         "cosechas": list(COSECHAS),

@@ -6,6 +6,27 @@
 > reproducible. **No son evidencia de desempeño en carteras reales**, ni
 > representan cifras comerciales de Quórum Risk.
 
+## La conclusión primero: aquí NO recomendamos desplegar ML
+
+En el experimento sintético, **ordenar las cuentas por saldo** captura
+**41,09 %** de la exposición de cuentas que posteriormente curan al revisar
+el 20 % de las cuentas. El mejor candidato ML por ese mismo criterio,
+gradient boosting, alcanza **41,43 %: apenas +0,34 puntos porcentuales**.
+La diferencia es pequeña, no se ha estimado su incertidumbre y no demuestra
+ganancia económica ni un efecto causal de la gestión. **No hay evidencia
+suficiente para recomendar pagar el costo y la complejidad de implantarlo**:
+la regla sencilla es la recomendación prudente en esta simulación.
+
+**Esto es criterio, no un fracaso del modelado.** Para Quórum Risk, un
+*quórum* de enfoques exige que cada modelo justifique su entrada frente a
+reglas operativas verificables: **si ML no aporta valor incremental convincente,
+no entra en producción**. El objetivo del caso es mostrar cómo tomar esa
+decisión con un target claro, control de fuga temporal y pruebas reproducibles.
+
+**Evidencia:** [métricas](reports/metricas.json) ·
+[comparación con reglas](reports/figures/valor_incremental.png) ·
+[interpretación y límites](reports/resumen.md).
+
 ## El problema de negocio
 
 Entre cuentas que **ya están en mora de 30–60 días**, ¿cuáles tienen mayor
@@ -49,7 +70,15 @@ También: [ROC y precisión-recall](reports/figures/discriminacion.png) ·
 
 ## Reproducir desde cero
 
-Necesitas Python 3.10+ (recomendado 3.11–3.12). Desde la raíz del repositorio:
+**Entorno de referencia: Python 3.12.14 y dependencias exactas** declaradas
+en `requirements.txt`. Consulta la [ficha de entorno y procedencia](docs/ENTORNO.md)
+para el sistema Linux probado, las versiones y el significado del commit fuente.
+**Los resultados reproducen bit a bit instalando las versiones fijadas en el
+entorno verificado**: en una copia limpia con entorno virtual aislado se
+obtuvieron hashes SHA-256 idénticos para `metricas.json`, `tabla_lift.csv`,
+`resumen.md` y las cinco figuras. No extendemos esa garantía a otros sistemas
+operativos, motores gráficos o fuentes sin volver a comprobarlos.
+Desde la raíz del repositorio:
 
 ```bash
 python -m venv .venv

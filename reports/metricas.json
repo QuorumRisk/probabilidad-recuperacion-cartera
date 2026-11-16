@@ -1,5 +1,19 @@
 {
   "aviso": "SIMULACION. Datos sintéticos; ninguna métrica corresponde a clientes reales.",
+  "entorno": {
+    "python": "3.12.14",
+    "sistema": "Linux",
+    "arquitectura": "x86_64",
+    "librerias": {
+      "numpy": "2.3.5",
+      "pandas": "2.2.3",
+      "scikit-learn": "1.8.0",
+      "matplotlib": "3.10.8",
+      "PyYAML": "6.0.3"
+    },
+    "commit_codigo_fuente": "32705235",
+    "nota_commit": "Revisión auditada del código predictivo; no es el SHA del commit que contiene este JSON."
+  },
   "semilla": 20261116,
   "prestamos_por_cosecha": 2600,
   "cosechas": [

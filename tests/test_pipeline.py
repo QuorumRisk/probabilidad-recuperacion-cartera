@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import platform
 import unittest
 from pathlib import Path
+from importlib.metadata import version
 
 import numpy as np
 import pandas as pd
@@ -17,6 +19,7 @@ from src.evaluacion.metricas import (
 )
 from src.features.construccion import COLUMNAS_MODELO, construir_variables
 from src.models.combinacion.modelo import combinar, seleccionar_peso
+from run_demo import COMMIT_CODIGO_FUENTE
 
 
 class PruebasDelCaso(unittest.TestCase):
@@ -208,6 +211,18 @@ class PruebasDelCaso(unittest.TestCase):
                 modelo["captura_saldo_curado_top_20_pct"] - valor_referencia,
                 places=5,
             )
+
+    def test_entorno_publicado_coincide_con_dependencias_fijadas(self):
+        raiz = Path(__file__).resolve().parents[1]
+        datos = json.loads((raiz / "reports" / "metricas.json").read_text(encoding="utf-8"))
+        entorno = datos["entorno"]
+        self.assertEqual(entorno["python"], platform.python_version())
+        self.assertEqual(entorno["sistema"], platform.system())
+        self.assertEqual(entorno["commit_codigo_fuente"], COMMIT_CODIGO_FUENTE)
+        for linea in (raiz / "requirements.txt").read_text(encoding="utf-8").splitlines():
+            nombre, version_fijada = linea.strip().split("==")
+            self.assertEqual(version_fijada, version(nombre))
+            self.assertEqual(entorno["librerias"][nombre], version_fijada)
 
 
 if __name__ == "__main__":
