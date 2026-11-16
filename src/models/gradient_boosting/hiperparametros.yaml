@@ -1,0 +1,6 @@
+learning_rate: 0.065
+max_iter: 140
+max_leaf_nodes: 13
+min_samples_leaf: 40
+l2_regularization: 2.0
+random_state: 20261116

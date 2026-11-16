@@ -1,0 +1,12 @@
+/data/
+.env
+.env.*
+*.pkl
+*.pickle
+*.joblib
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store

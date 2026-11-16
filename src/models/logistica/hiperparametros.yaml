@@ -1,0 +1,4 @@
+C: 0.6
+max_iter: 600
+class_weight: null
+random_state: 20261116
