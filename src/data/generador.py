@@ -1,8 +1,9 @@
-"""Panel de préstamos *enteramente sintético*; ningún registro representa a personas.
+"""Panel de préstamos enteramente sintético con libro de cuotas vencidas.
 
-Todas las transiciones se simulan en orden cronológico con un RNG de semilla fija.
-El estado del mes depende de historial/ingresos/carga financiera y de choques
-no observables por el modelo. No se introduce una etiqueta prefabricada.
+La incertidumbre modifica cuánto dinero paga cada préstamo, **no** su DPD.
+El atraso monetario es una obligación exigible: pendiente anterior + cuota
+del mes - pago. El bucket se deriva del saldo vencido expresado en cuotas.
+Ningún registro representa a una persona o una cartera real.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ def generar_panel(
     cosechas: tuple[int, ...] = COSECHAS,
     meses: int = 12,
 ) -> pd.DataFrame:
-    """Genera 12 observaciones mensuales por crédito originado en enero.
+    """Genera 12 cierres mensuales por crédito originado en enero de su cosecha.
 
     Los meses 4–9 contienen las decisiones elegibles; su horizonte de tres
     meses termina, como máximo, en diciembre del mismo año. Esto permite
@@ -65,76 +66,55 @@ def generar_panel(
             - 0.32 * resiliencia_oculta
         )
 
-        dpd = np.zeros(n, dtype=int)
+        saldo_vencido = np.zeros(n, dtype=float)
         saldo = principal.copy()
+        interes_pendiente = np.zeros(n, dtype=float)
         for mes in range(1, meses + 1):
             # Condiciones de entorno ilustrativas; 2022 presenta leve tensión.
             tension = {2019: -0.17, 2020: 0.07, 2021: -0.08, 2022: 0.22}.get(cosecha, 0.0)
             shock = rng.normal(0, 0.85, n)
-            pago_ratio = np.clip(
-                rng.normal(
-                    1.10
-                    - 0.34 * (dpd > 0)
-                    - 0.075 * vulnerabilidad
-                    + 0.16 * resiliencia_oculta
-                    - 0.22 * shock
-                    - 0.08 * tension,
-                    0.25,
-                    n,
-                ),
-                0.0,
-                2.2,
-            )
-            u = rng.random(n)
-            siguiente = dpd.copy()
+            vencido_inicio = saldo_vencido.copy()
+            cuota_redondeada = np.round(cuota, 2)
+            exigible = np.round(vencido_inicio + cuota_redondeada, 2)
 
-            al_dia = dpd == 0
-            p_entrada = _sigmoide(
-                -3.05 + 0.64 * vulnerabilidad + 0.50 * shock + 0.40 * tension
-                - 1.30 * (pago_ratio - 0.85)
+            # Cliente sano: pagar la cuota íntegra es el estado habitual;
+            # el impago parcial nace de capacidad, exposición y shocks.
+            al_dia = vencido_inicio <= 0.0
+            p_cuota = _sigmoide(
+                2.85 - 0.72 * vulnerabilidad + 0.23 * resiliencia_oculta
+                - 0.52 * shock - 0.40 * tension
             )
-            siguiente[al_dia & (u < p_entrada)] = 30
-
-            mora30 = dpd == 30
-            p_cura30 = _sigmoide(
-                0.12 - 0.48 * vulnerabilidad + 1.8 * (pago_ratio - 0.72)
-                + 0.18 * resiliencia_oculta - 0.32 * shock - 0.3 * tension
+            # Cliente moroso: ponerse al día exige recursos para cuota actual
+            # y todas las cuotas vencidas. Un atraso grande reduce probabilidad.
+            cuotas_atrasadas = vencido_inicio / cuota_redondeada
+            p_regularizar = _sigmoide(
+                0.35 - 0.52 * vulnerabilidad + 0.24 * resiliencia_oculta
+                - 0.54 * shock - 0.28 * tension - 0.34 * cuotas_atrasadas
             )
-            p_empeora30 = _sigmoide(
-                -0.70 + 0.32 * vulnerabilidad - 1.2 * (pago_ratio - 0.65)
+            decide_pagar = rng.random(n)
+            pago_parcial = np.round(cuota_redondeada * rng.beta(1.5, 2.5, n), 2)
+            pago_con_atraso = np.round(cuota_redondeada * rng.uniform(0.05, 1.25, n), 2)
+            pago = np.where(
+                al_dia,
+                np.where(decide_pagar < p_cuota, cuota_redondeada, pago_parcial),
+                np.where(decide_pagar < p_regularizar, exigible, pago_con_atraso),
             )
-            siguiente[mora30 & (u < p_cura30)] = 0
-            siguiente[
-                mora30 & (u >= p_cura30) & (u < p_cura30 + (1 - p_cura30) * p_empeora30)
-            ] = 60
+            # Sin prepagos ni condonaciones en este caso: no puede cobrarse
+            # más del monto exigible y toda obligación impaga queda en mora.
+            pago = np.minimum(np.maximum(0.0, pago), exigible)
+            saldo_vencido = np.round(np.maximum(0.0, exigible - pago), 2)
+            cuotas_impagas_equivalentes = np.ceil(
+                np.maximum(0.0, saldo_vencido / cuota_redondeada - 1e-10)
+            ).astype(int)
+            dpd = np.minimum(cuotas_impagas_equivalentes, 4) * 30
 
-            mora60 = dpd == 60
-            p_cura60 = _sigmoide(
-                -0.85 - 0.44 * vulnerabilidad + 1.55 * (pago_ratio - 0.70)
-                + 0.17 * resiliencia_oculta - 0.36 * shock
-            )
-            p_mejora60 = 0.34
-            p_empeora60 = 0.37
-            siguiente[mora60 & (u < p_cura60)] = 0
-            siguiente[mora60 & (u >= p_cura60) & (u < p_cura60 + (1 - p_cura60) * p_mejora60)] = 30
-            siguiente[
-                mora60
-                & (u >= p_cura60 + (1 - p_cura60) * p_mejora60)
-                & (u < p_cura60 + (1 - p_cura60) * (p_mejora60 + p_empeora60))
-            ] = 90
-
-            mora90 = dpd == 90
-            p_cura90 = _sigmoide(-2.9 - 0.5 * vulnerabilidad + 0.7 * (pago_ratio - 0.7))
-            siguiente[mora90 & (u < p_cura90)] = 0
-            siguiente[mora90 & (u >= p_cura90) & (u < p_cura90 + 0.18)] = 60
-            siguiente[mora90 & (u >= p_cura90 + 0.18) & (u < p_cura90 + 0.52)] = 120
-            # 120 DPD es absorbente en esta simulación simplificada.
-            siguiente[dpd == 120] = 120
-            dpd = siguiente
-
-            pago = cuota * pago_ratio
-            interes = saldo * tasa_mes
-            saldo = np.maximum(0.0, saldo - np.maximum(0.0, pago - interes))
+            # Principal simplificado: intereses exigibles se pagan antes que
+            # principal. El libro contractual de cuotas vencidas anterior es
+            # la fuente única del DPD, no el saldo principal contable.
+            interes_pendiente = np.round(interes_pendiente + saldo * tasa_mes, 2)
+            pago_interes = np.minimum(pago, interes_pendiente)
+            interes_pendiente = np.round(interes_pendiente - pago_interes, 2)
+            saldo = np.maximum(0.0, np.round(saldo - (pago - pago_interes), 2))
             bloques.append(
                 pd.DataFrame(
                     {
@@ -150,8 +130,11 @@ def generar_panel(
                         "principal_original": principal,
                         "plazo_meses": plazo,
                         "tasa_anual": tasa,
-                        "cuota_programada": cuota,
+                        "cuota_programada": cuota_redondeada,
+                        "saldo_vencido_inicio": vencido_inicio,
+                        "obligacion_exigible": exigible,
                         "pago_realizado": pago,
+                        "saldo_vencido_cierre": saldo_vencido.copy(),
                         "saldo_actual": saldo.copy(),
                         "dias_mora": dpd.copy(),
                     }

@@ -11,52 +11,65 @@
   "target": "0 dias de mora en alguno de los 3 meses posteriores a estar en 30/60 DPD",
   "corte": "ultimo dia del mes de decision; historia hasta t, target en t+1..t+3",
   "muestras": {
-    "entrenamiento_2019_2020": 2207,
-    "validacion_2021": 1068,
-    "test_2022": 1217
+    "entrenamiento_2019_2020": 2699,
+    "validacion_2021": 1293,
+    "test_2022": 1483
   },
-  "prevalencia_test": 0.605588,
+  "prevalencia_test": 0.715442,
   "peso_logistica_combinacion": 0.75,
   "brier_validacion_por_peso": {
-    "0.25": 0.21568716698010099,
-    "0.5": 0.2125959639810207,
-    "0.75": 0.2108629778403879
+    "0.25": 0.18947282812694274,
+    "0.5": 0.18707634661969572,
+    "0.75": 0.18554873008504205
   },
   "criterio_ganador": "captura del saldo de cuentas curadas en top 20% por p(cura)*saldo al decidir; empate por Brier",
   "modelo_ganador": "gradient_boosting",
+  "baselines": {
+    "saldo_descendente": {
+      "captura_saldo_curado_top_20_pct": 41.093183
+    },
+    "dpd_30_antes_60_desempate_saldo": {
+      "captura_saldo_curado_top_20_pct": 40.126769
+    }
+  },
+  "mejor_baseline": "saldo_descendente",
+  "nota_uplift": "Diferencia descriptiva de captura vs regla simple; NO es uplift causal ni beneficio monetario.",
   "modelos": {
     "logistica": {
-      "auc_roc": 0.672801,
-      "ks": 0.258404,
-      "pr_auc_average_precision": 0.744866,
-      "brier": 0.218954,
-      "log_loss": 0.628378,
-      "precision_umbral_050": 0.662028,
-      "recall_umbral_050": 0.903664,
-      "prevalencia_cura": 0.605588,
-      "captura_saldo_curado_top_20_pct": 42.101125
+      "auc_roc": 0.636563,
+      "ks": 0.228848,
+      "pr_auc_average_precision": 0.803938,
+      "brier": 0.195789,
+      "log_loss": 0.577089,
+      "precision_umbral_050": 0.722498,
+      "recall_umbral_050": 0.959472,
+      "prevalencia_cura": 0.715442,
+      "captura_saldo_curado_top_20_pct": 40.872219,
+      "uplift_vs_mejor_baseline_pp": -0.220964
     },
     "gradient_boosting": {
-      "auc_roc": 0.651928,
-      "ks": 0.247368,
-      "pr_auc_average_precision": 0.734095,
-      "brier": 0.226663,
-      "log_loss": 0.645827,
-      "precision_umbral_050": 0.645482,
-      "recall_umbral_050": 0.881954,
-      "prevalencia_cura": 0.605588,
-      "captura_saldo_curado_top_20_pct": 42.711628
+      "auc_roc": 0.615198,
+      "ks": 0.201596,
+      "pr_auc_average_precision": 0.79589,
+      "brier": 0.199817,
+      "log_loss": 0.586873,
+      "precision_umbral_050": 0.721229,
+      "recall_umbral_050": 0.95099,
+      "prevalencia_cura": 0.715442,
+      "captura_saldo_curado_top_20_pct": 41.434799,
+      "uplift_vs_mejor_baseline_pp": 0.341616
     },
     "combinacion": {
-      "auc_roc": 0.672343,
-      "ks": 0.250455,
-      "pr_auc_average_precision": 0.747547,
-      "brier": 0.219346,
-      "log_loss": 0.628695,
-      "precision_umbral_050": 0.656805,
-      "recall_umbral_050": 0.903664,
-      "prevalencia_cura": 0.605588,
-      "captura_saldo_curado_top_20_pct": 42.001345
+      "auc_roc": 0.637175,
+      "ks": 0.23208,
+      "pr_auc_average_precision": 0.808028,
+      "brier": 0.195648,
+      "log_loss": 0.57643,
+      "precision_umbral_050": 0.723992,
+      "recall_umbral_050": 0.964185,
+      "prevalencia_cura": 0.715442,
+      "captura_saldo_curado_top_20_pct": 41.022108,
+      "uplift_vs_mejor_baseline_pp": -0.071075
     }
   }
 }

@@ -20,6 +20,8 @@ NUMERICAS = [
     "cuota_sobre_ingreso",
     "saldo_decision",
     "ratio_saldo_original",
+    "saldo_vencido_decision",
+    "cuotas_vencidas_equivalentes",
     "dias_mora_decision",
     "pago_ratio_ultimo_mes",
     "pago_ratio_media_3m",
@@ -80,13 +82,16 @@ def construir_variables(panel: pd.DataFrame, decisiones: pd.DataFrame) -> pd.Dat
     columnas_decision = [
         "loan_id", "cosecha", "fecha_decision", "label_cura_3m", "saldo_cura_observado",
         "mes_edad", "ingreso_anual", "dti_originacion", "principal_original", "plazo_meses",
-        "tasa_anual", "cuota_programada", "saldo_decision", "dias_mora", "grado_riesgo",
+        "tasa_anual", "cuota_programada", "saldo_decision", "saldo_vencido_cierre",
+        "dias_mora", "grado_riesgo",
         "proposito", "pago_realizado",
     ]
     tabla = decisiones[columnas_decision].set_index("loan_id").join(p3).join(p6)
     tabla["ingreso_mensual"] = tabla["ingreso_anual"] / 12.0
     tabla["cuota_sobre_ingreso"] = tabla["cuota_programada"] / tabla["ingreso_mensual"].clip(lower=0.01)
     tabla["ratio_saldo_original"] = tabla["saldo_decision"] / tabla["principal_original"].clip(lower=0.01)
+    tabla["saldo_vencido_decision"] = tabla["saldo_vencido_cierre"]
+    tabla["cuotas_vencidas_equivalentes"] = tabla["saldo_vencido_cierre"] / tabla["cuota_programada"].clip(lower=0.01)
     tabla["dias_mora_decision"] = tabla["dias_mora"]
     tabla["pago_ratio_ultimo_mes"] = tabla["pago_realizado"] / tabla["cuota_programada"].clip(lower=0.01)
     tabla["recencia_ultimo_al_dia_6m"] = (

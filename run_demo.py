@@ -16,7 +16,7 @@ import pandas as pd
 from src.data.generador import COSECHAS, SEMILLA, generar_panel
 from src.data.preparacion import definir_observaciones
 from src.evaluacion.graficos import guardar_figuras
-from src.evaluacion.metricas import calcular_metricas, captura_top_20, tabla_lift
+from src.evaluacion.metricas import calcular_metricas, captura_top_20, prioridades_sin_ml, tabla_lift
 from src.features.construccion import COLUMNAS_MODELO, construir_variables
 from src.models.combinacion.modelo import combinar, seleccionar_peso
 from src.models.gradient_boosting.modelo import crear_modelo as crear_boosting
@@ -36,7 +36,31 @@ def _generar_resumen(
         filas.append(
             f"| {nombre} | {m['auc_roc']:.3f} | {m['ks']:.3f} | "
             f"{m['pr_auc_average_precision']:.3f} | {m['brier']:.3f} | "
-            f"{m['captura_saldo_curado_top_20_pct']:.1f}% |"
+            f"{m['captura_saldo_curado_top_20_pct']:.2f}% | "
+            f"{m['uplift_vs_mejor_baseline_pp']:+.2f} pp |"
+        )
+    lineas_baselines = [
+        f"| `{nombre}` | {datos['captura_saldo_curado_top_20_pct']:.2f}% |"
+        for nombre, datos in metricas["baselines"].items()
+    ]
+    mejor_baseline = metricas["mejor_baseline"]
+    valor_baseline = metricas["baselines"][mejor_baseline]["captura_saldo_curado_top_20_pct"]
+    uplift_ganador = metricas["modelos"][ganador]["uplift_vs_mejor_baseline_pp"]
+    if uplift_ganador < 0:
+        lectura_incremento = (
+            "No se observa mejora frente a la regla sencilla; desplegar ML "
+            "para este objetivo no estaría justificado por esta prueba."
+        )
+    elif uplift_ganador < 1:
+        lectura_incremento = (
+            "La diferencia es pequeña y no justifica por sí sola la complejidad "
+            "de ML. Faltan intervalos de incertidumbre, costos y una evaluación "
+            "prospectiva antes de recomendar su despliegue."
+        )
+    else:
+        lectura_incremento = (
+            "La diferencia merece una evaluación adicional, pero todavía faltan "
+            "incertidumbre, costos y pruebas prospectivas para justificar ML."
         )
     return f"""# Informe fuera de tiempo · simulación
 
@@ -55,7 +79,8 @@ def _generar_resumen(
 
 ## Corte y validación
 
-- Generación de préstamos originados en enero de cada año, 2019–2022.
+- Por diseño, los préstamos se originan el **1 de enero de su cosecha**
+  (2019, 2020, 2021 o 2022): convención artificial de la simulación.
 - Entrenamiento: cosechas 2019–2020; elección de peso: validación 2021;
   prueba intacta: cosecha **2022**.
 - Las etiquetas de cada cosecha quedan observadas hasta diciembre de su propio
@@ -66,11 +91,23 @@ def _generar_resumen(
 
 ## Métricas en test 2022 (simuladas)
 
-| Modelo | AUC ROC | KS | PR-AUC/AP | Brier ↓ | Saldo curado capturado, top 20% |
-| --- | ---: | ---: | ---: | ---: | ---: |
+| Modelo | AUC ROC | KS | PR-AUC/AP | Brier ↓ | Captura top 20% | Δ vs. mejor regla simple |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
 {chr(10).join(filas)}
 
-**Ganador en este experimento: `{ganador}`.** Se define a priori como el
+## Referencias sin Machine Learning
+
+| Regla (fijada antes de evaluar) | Captura top 20% |
+| --- | ---: |
+{chr(10).join(lineas_baselines)}
+
+La mejor regla sencilla es **`{mejor_baseline}`** ({valor_baseline:.2f}%).
+La mejora observada del modelo seleccionado es **{uplift_ganador:+.2f} puntos
+porcentuales**. **No es uplift causal ni resultado económico**:
+es la diferencia de captura observada en esta muestra sintética.
+{lectura_incremento}
+
+**Ganador entre los modelos en este experimento: `{ganador}`.** Se define a priori como el
 modelo que concentra más saldo de cuentas que curan al priorizar el 20% de
 cuentas por `P(cura) × saldo_decision`; el Brier es el desempate. No se
 presupone que un ensemble mejore al modelo individual.
@@ -88,6 +125,8 @@ Los números son específicos de estas reglas artificiales, no transferibles.
 - [`figures/lift.png`](figures/lift.png): lift por decil.
 - [`figures/valor_capturado.png`](figures/valor_capturado.png): exposición
   de cuentas que curan, ordenando por valor esperado proxy.
+- [`figures/valor_incremental.png`](figures/valor_incremental.png):
+  comparación contra reglas sin ML y diferencias en puntos porcentuales.
 
 ## Límites antes de trabajar con clientes reales
 
@@ -150,11 +189,29 @@ def ejecutar(semilla: int = SEMILLA, prestamos_por_cosecha: int = 2600) -> dict:
         "combinacion": combinar(pl, pb, peso_logistica),
     }
     saldos = te["saldo_decision"].to_numpy(dtype=float)
+    dpds = te["dias_mora_decision"].to_numpy(dtype=int)
+    prioridades_base = prioridades_sin_ml(saldos, dpds)
+    baselines = {
+        nombre: {
+            "captura_saldo_curado_top_20_pct": captura_top_20(
+                yte, np.zeros(len(yte)), saldos, prioridad=prioridad
+            )
+        }
+        for nombre, prioridad in prioridades_base.items()
+    }
+    mejor_baseline = max(
+        baselines,
+        key=lambda nombre: baselines[nombre]["captura_saldo_curado_top_20_pct"],
+    )
+    referencia = baselines[mejor_baseline]["captura_saldo_curado_top_20_pct"]
     resultados = {}
     lifts = []
     for nombre, prob in predicciones.items():
         met = calcular_metricas(yte, prob)
         met["captura_saldo_curado_top_20_pct"] = captura_top_20(yte, prob, saldos)
+        met["uplift_vs_mejor_baseline_pp"] = round(
+            met["captura_saldo_curado_top_20_pct"] - referencia, 6
+        )
         resultados[nombre] = met
         lifts.append(tabla_lift(yte, prob, saldos, nombre))
     # Métrica de negocio explícita: capturar saldo curado en top 20%; empate por Brier.
@@ -173,6 +230,9 @@ def ejecutar(semilla: int = SEMILLA, prestamos_por_cosecha: int = 2600) -> dict:
         "brier_validacion_por_peso": briers_validacion,
         "criterio_ganador": "captura del saldo de cuentas curadas en top 20% por p(cura)*saldo al decidir; empate por Brier",
         "modelo_ganador": ganador,
+        "baselines": baselines,
+        "mejor_baseline": mejor_baseline,
+        "nota_uplift": "Diferencia descriptiva de captura vs regla simple; NO es uplift causal ni beneficio monetario.",
         "modelos": resultados,
     }
     (informes / "metricas.json").write_text(json.dumps(reporte, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -181,7 +241,7 @@ def ejecutar(semilla: int = SEMILLA, prestamos_por_cosecha: int = 2600) -> dict:
     (informes / "resumen.md").write_text(
         _generar_resumen(reporte, tabla, peso=peso_logistica, ganador=ganador), encoding="utf-8"
     )
-    guardar_figuras(yte, predicciones, saldos, informes / "figures")
+    guardar_figuras(yte, predicciones, saldos, informes / "figures", baselines=prioridades_base)
     return reporte
 
 

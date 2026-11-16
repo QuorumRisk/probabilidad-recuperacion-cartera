@@ -16,6 +16,7 @@ futuras y exige exactamente los mismos predictores.
 | Origen del contrato | `principal_original`, `plazo_meses`, `tasa_anual`, `grado_riesgo`, `proposito` | Condiciones de partida y segmento |
 | Capacidad de pago | `ingreso_mensual`, `dti_originacion`, `cuota_sobre_ingreso` | Presión de obligaciones sobre liquidez |
 | Exposición al decidir | `saldo_decision`, `ratio_saldo_original`, `mes_edad` | Magnitud y madurez del crédito |
+| Atraso exigible al decidir | `saldo_vencido_decision`, `cuotas_vencidas_equivalentes` | Monto real vencido de la simulación, distinto de solo el bucket |
 | Estado actual | `dias_mora_decision`, `pago_ratio_ultimo_mes` | Severidad y señal reciente de esfuerzo de pago |
 | Dinámica de pagos (3m) | `pago_ratio_media_3m`, `pago_ratio_volatilidad_3m`, `pago_ratio_tendencia_3m` | Persistencia, irregularidad, cambio en pagos |
 | Historial de mora | `meses_en_mora_3m`, `meses_en_mora_6m`, `peor_mora_6m`, `dpd_tendencia_3m` | Frecuencia y dirección del deterioro |
@@ -29,8 +30,11 @@ si el simulador observa abonos superiores a la cuota.
 ## Política de anti-fuga
 
 **Permitido:** columnas contractuales desde originación y desempeño
-acumulado/observado **solo hasta `t`**. El valor `saldo_decision` también
-es legítimo para priorización porque ya existe al decidir.
+acumulado/observado **solo hasta `t`**. Los valores `saldo_decision` y
+`saldo_vencido_cierre` son legítimos porque se conocen al cerrar el mes;
+el segundo se renombra en la foto de decisión. Para entrar en el universo
+se exigen tres cierres previos **consecutivos y con datos no nulos**; la
+ausencia de un mes no se reemplaza por el mes vecino.
 
 **Excluido como predictor:**
 
@@ -50,11 +54,15 @@ es legítimo para priorización porque ya existe al decidir.
 El script `src/data/generador.py` usa semilla fija y cuatro cohortes
 de 2.600 créditos cada una; ingresos lognormales acotados, DTI beta acotado,
 grados A–E, principales lognormales, plazo discreto y tasa dependiente del
-grado con ruido. Simula pagos mensuales y transiciones estocásticas entre
-0, 30, 60, 90 y 120 DPD. La probabilidad de cambiar de estado incluye
-historial, grado, carga de pago, shocks no observados y ruido; 120 DPD es
-absorbente. En 2022 añade una tensión macro inventada. El saldo es una
-aproximación con interés y amortización simplificados.
+grado con ruido. **Los pagos son estocásticos; la mora no se asigna por
+sorteo**. Cada mes: `exigible = atraso_al_inicio + cuota`; tras aplicar
+el pago, `atraso_al_cierre = max(0, exigible − pago)`. El bucket es
+`min(120, 30 × ceil(atraso_al_cierre / cuota))`, con margen numérico para
+redondeos. El de 120 es un tope, **no absorbente**. La función de pago
+depende de contrato, vulnerabilidad, shock mensual y atraso previo; se
+añade en 2022 una tensión macro inventada. Los equivalentes de cuotas
+impagas **no reproducen la antigüedad contractual exacta de un impago**.
+El saldo principal e intereses se aproximan con reglas simplificadas.
 
 Este panel no tiene estimación paramétrica proveniente de entidades reales
 ni permite concluir qué señales causan curación. El experimento sirve para

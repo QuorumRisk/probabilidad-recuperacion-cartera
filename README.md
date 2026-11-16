@@ -40,6 +40,7 @@ Resultados generados con la semilla pública:
 - [Resumen ejecutivo técnico](reports/resumen.md)
 - [Métricas por modelo](reports/metricas.json)
 - [Lift por decil](reports/tabla_lift.csv)
+- [Comparación con reglas sin ML](reports/figures/valor_incremental.png)
 
 ![Concentración del saldo en cuentas que curan — simulación](reports/figures/valor_capturado.png)
 
@@ -64,8 +65,8 @@ y `decisiones_sinteticas.csv` para inspección local. **`data/` está ignorado
 por Git y ningún dato crudo se publica**. Los archivos versionados bajo
 `reports/` son agregados, figuras y resúmenes de una simulación.
 
-Semilla: `20261116` · **2.600 créditos originados en enero por cada una de
-cuatro cosechas** · **12 cierres mensuales por préstamo**. Cambiar la semilla
+Semilla: `20261116` · **2.600 créditos originados el 1 de enero de cada
+cosecha (2019, 2020, 2021 y 2022)** · **12 cierres mensuales por préstamo**. Cambiar la semilla
 o el tamaño altera los resultados:
 
 ```bash
@@ -90,25 +91,35 @@ python run_demo.py --semilla 20261116 --prestamos-por-cosecha 2600
 1. Los préstamos nacen en **enero de 2019, 2020, 2021 o 2022**. Sus atributos
    iniciales (ingreso, DTI, grado, propósito, saldo inicial, plazo y tasa)
    proceden de distribuciones documentadas en `src/data/generador.py`.
-2. En cada cierre mensual se simula el **pago observado**, con ruido y un
-   componente de resiliencia no observable. El saldo se actualiza según pago
-   y devengo simplificados; **no es un motor contable**.
-3. El estado de mora recorre `0 → 30 → 60 → 90 → 120` días y admite curaciones,
-   mejoras y deterioros. La probabilidad de transición depende de grado,
-   carga financiera, pagos, shock mensual y un componente oculto. El estado
-   `120` es absorbente en este ejemplo. El año 2022 incorpora una tensión de
-   entorno ilustrativa.
-4. El azar evita que la curación sea perfectamente predecible. No se crean
+2. En cada cierre se fija la **cuota contractual** y se construye el libro
+   monetario de vencidos: **exigible = atraso inicial + cuota del mes**;
+   **atraso al cierre = máximo(0, exigible − pago realizado)**. Se guardan
+   explícitamente `cuota_programada`, `pago_realizado`,
+   `saldo_vencido_inicio`, `obligacion_exigible` y `saldo_vencido_cierre`.
+3. **El DPD no se sortea ni salta arbitrariamente**: se deriva de las
+   cuotas vencidas equivalentes al cierre, usando tramos de 30 días
+   (`0 / 30 / 60 / 90 / 120`, con 120 como límite superior). Una cuenta
+   únicamente se cura cuando paga **atraso previo y cuota actual**. Con
+   pago menor que la cuota puede deteriorarse; si paga al menos la cuota,
+   no puede aumentar su atraso monetario. `120` **no es absorbente**.
+4. La aleatoriedad actúa **solo en cuánto paga cada cliente**: la
+   probabilidad y magnitud del pago dependen de grado, carga de cuota,
+   capacidad latente, shock mensual y saldo ya vencido; 2022 incorpora
+   tensión ambiental ficticia. El principal/los intereses se actualizan
+   por una regla simplificada, **no un motor contable real**. Los buckets
+   de DPD son **equivalentes de cuotas impagas**, no la antigüedad exacta
+   de la factura vencida más antigua de un sistema de servicing.
+5. El azar evita que la curación sea perfectamente predecible. No se crean
    etiquetas artificiales independientes del historial: el target se obtiene
    **leyendo los estados futuros reales dentro de la propia simulación**.
-5. Es un mecanismo **inventado para enseñar el pipeline**, no calibrado con
+6. Es un mecanismo **inventado para enseñar el pipeline**, no calibrado con
    estadísticas históricas de ninguna institución. No se debe interpretar
    como una estimación de la mora o la curación de una población real.
 
 ### Anti-fuga: variables permitidas y excluidas
 
 - **Disponibles:** características del contrato en originación, saldo
-  **al cierre de `t`**, DPD de `t`, pago observado hasta `t`, tasas/ratios,
+  **al cierre de `t`**, saldo vencido de `t`, DPD de `t`, pago observado hasta `t`, tasas/ratios,
   recencia y tendencias calculadas con hasta seis meses previos.
 - **Excluidos de la matriz del modelo:** `loan_id`, `cosecha`,
   `fecha_decision`, `label_cura_3m`, `saldo_cura_observado`; todos los
@@ -117,6 +128,25 @@ python run_demo.py --semilla 20261116 --prestamos-por-cosecha 2600
   **solo** se usa para etiquetar/evaluar, nunca para construir features.
 - Una lista positiva `COLUMNAS_MODELO` garantiza el esquema. Un test cambia
   deliberadamente los estados futuros y verifica que **las features no cambien**.
+- Una decisión exige **tres cierres anteriores consecutivos** (`t−3` a
+  `t−1`, con datos observados) y **tres posteriores consecutivos con DPD
+  conocido** (`t+1` a `t+3`). Un faltante o `NaN` futuro vuelve la
+  observación **no etiquetable**: nunca se sustituye por etiqueta negativa.
+
+### ¿Aporta algo frente a una regla sencilla?
+
+Antes de justificar un score se comparan dos políticas **sin ML**:
+
+1. Atender primero los créditos de **mayor saldo** al cierre `t`.
+2. Atender primero las cuentas en **30 DPD**, después las de 60 DPD,
+   desempatando por saldo descendente. Es una regla ilustrativa, no una
+   política validada en un negocio real.
+
+La métrica común es el **porcentaje de exposición en cuentas que curaron**
+que se concentra al priorizar el **20% de cuentas**. En el informe se
+contrasta cada candidato con la **mejor de estas dos reglas** en puntos
+porcentuales; una diferencia observada **no es causalidad, cobro realizado
+ni beneficio económico**. [Ver medición regenerada](reports/resumen.md).
 
 ## Alcance y fuentes
 

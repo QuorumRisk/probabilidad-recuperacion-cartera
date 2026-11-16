@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from src.data.generador import generar_panel
 from src.data.preparacion import definir_observaciones
-from src.evaluacion.metricas import calcular_metricas, curva_valor_capturado, tabla_lift
+from src.evaluacion.metricas import (
+    calcular_metricas, captura_top_20, curva_valor_capturado,
+    prioridades_sin_ml, tabla_lift,
+)
 from src.features.construccion import COLUMNAS_MODELO, construir_variables
 from src.models.combinacion.modelo import combinar, seleccionar_peso
 
@@ -94,6 +99,115 @@ class PruebasDelCaso(unittest.TestCase):
         self.assertAlmostEqual(float(curva["saldo_curado_capturado_pct"].iloc[-1]), 100.0)
         self.assertTrue(curva["saldo_curado_capturado_pct"].is_monotonic_increasing)
         self.assertEqual(int(tabla_lift(y, mezcla, saldos, "prueba")["cuentas"].sum()), len(y))
+
+    def test_sin_historia_de_tres_cierres_no_hay_decision(self):
+        ejemplo = self.decisiones.iloc[0]
+        prestamo = ejemplo["loan_id"]
+        t = int(ejemplo["mes_edad"])
+        panel = self.panel.loc[
+            ~((self.panel["loan_id"] == prestamo) & (self.panel["mes_edad"] < t))
+        ].copy()
+        resultado = definir_observaciones(panel)
+        self.assertNotIn(prestamo, set(resultado["loan_id"]))
+
+    def test_una_laguna_en_historia_no_cuenta_como_cierre(self):
+        ejemplo = self.decisiones.iloc[1]
+        prestamo = ejemplo["loan_id"]
+        t = int(ejemplo["mes_edad"])
+        panel = self.panel.loc[
+            ~((self.panel["loan_id"] == prestamo) & (self.panel["mes_edad"] == t - 2))
+        ].copy()
+        resultado = definir_observaciones(panel)
+        self.assertNotIn(prestamo, set(resultado["loan_id"]))
+
+    def test_dpd_futuro_nan_no_se_etiqueta_negativo(self):
+        ejemplo = self.decisiones.iloc[2]
+        prestamo = ejemplo["loan_id"]
+        panel = self.panel.copy()
+        mask = panel["loan_id"].eq(prestamo) & panel["mes_edad"].eq(int(ejemplo["mes_edad"]) + 2)
+        panel.loc[mask, "dias_mora"] = np.nan
+        self.assertEqual(int(mask.sum()), 1)
+        resultado = definir_observaciones(panel)
+        self.assertNotIn(prestamo, set(resultado["loan_id"]))
+
+    def test_falta_cierre_futuro_no_se_etiqueta(self):
+        ejemplo = self.decisiones.iloc[3]
+        prestamo = ejemplo["loan_id"]
+        panel = self.panel.loc[
+            ~((self.panel["loan_id"] == prestamo) &
+              self.panel["mes_edad"].eq(int(ejemplo["mes_edad"]) + 1))
+        ].copy()
+        resultado = definir_observaciones(panel)
+        self.assertNotIn(prestamo, set(resultado["loan_id"]))
+
+    def test_mora_se_deriva_del_libro_de_cuotas(self):
+        p = self.panel
+        exigible = np.round(p["saldo_vencido_inicio"] + p["cuota_programada"], 2)
+        cierre = np.round(np.maximum(0.0, exigible - p["pago_realizado"]), 2)
+        np.testing.assert_allclose(p["obligacion_exigible"], exigible, atol=0.011)
+        np.testing.assert_allclose(p["saldo_vencido_cierre"], cierre, atol=0.011)
+        mora_esperada = np.minimum(
+            np.ceil(np.maximum(0.0, cierre / p["cuota_programada"] - 1e-10)).astype(int), 4
+        ) * 30
+        np.testing.assert_array_equal(p["dias_mora"], mora_esperada)
+
+    def test_no_hay_curas_sin_pagar_todo_lo_exigible(self):
+        p = self.panel.sort_values(["loan_id", "mes_edad"]).copy()
+        previo = p.groupby("loan_id")["dias_mora"].shift()
+        cura = previo.gt(0) & p["dias_mora"].eq(0)
+        self.assertGreater(int(cura.sum()), 0)
+        self.assertTrue(
+            (p.loc[cura, "pago_realizado"] >= p.loc[cura, "obligacion_exigible"] - 0.011).all()
+        )
+        entra = previo.eq(0) & p["dias_mora"].gt(0)
+        self.assertGreater(int(entra.sum()), 0)
+        self.assertTrue(
+            (p.loc[entra, "pago_realizado"] < p.loc[entra, "cuota_programada"]).all()
+        )
+        empeora = previo.notna() & p["dias_mora"].gt(previo)
+        self.assertTrue(
+            (p.loc[empeora, "pago_realizado"] < p.loc[empeora, "cuota_programada"]).all()
+        )
+
+    def test_reglas_baseline_priorizan_sin_conocer_el_target(self):
+        y = np.array([0, 1, 1, 0, 1, 0, 1, 0, 0, 0])
+        saldos = np.array([1, 10, 8, 9, 7, 6, 5, 4, 3, 2], dtype=float)
+        dpd = np.array([30, 60, 30, 60, 30, 60, 30, 60, 30, 60])
+        baselines = prioridades_sin_ml(saldos, dpd)
+        self.assertEqual(
+            np.argsort(-baselines["saldo_descendente"], kind="stable")[:2].tolist(), [1, 3]
+        )
+        self.assertEqual(
+            np.argsort(-baselines["dpd_30_antes_60_desempate_saldo"], kind="stable")[:2].tolist(), [2, 4]
+        )
+        total = float(np.dot(y, saldos))
+        captura_saldo = captura_top_20(y, np.zeros(len(y)), saldos,
+                                      prioridad=baselines["saldo_descendente"])
+        captura_dpd = captura_top_20(y, np.zeros(len(y)), saldos,
+                                    prioridad=baselines["dpd_30_antes_60_desempate_saldo"])
+        self.assertAlmostEqual(captura_saldo, round(100 * 10 / total, 6))
+        self.assertAlmostEqual(captura_dpd, round(100 * 15 / total, 6))
+
+    def test_resumen_publicado_concuerda_con_metricas_json(self):
+        raiz = Path(__file__).resolve().parents[1] / "reports"
+        datos = json.loads((raiz / "metricas.json").read_text(encoding="utf-8"))
+        resumen = (raiz / "resumen.md").read_text(encoding="utf-8")
+        for nombre, modelo in datos["modelos"].items():
+            valor = modelo["captura_saldo_curado_top_20_pct"]
+            diferencial = modelo["uplift_vs_mejor_baseline_pp"]
+            self.assertIn(f"| {nombre} |", resumen)
+            self.assertIn(f"{valor:.2f}%", resumen)
+            self.assertIn(f"{diferencial:+.2f} pp", resumen)
+        for base in datos["baselines"].values():
+            self.assertIn(f"{base['captura_saldo_curado_top_20_pct']:.2f}%", resumen)
+        mejor = datos["mejor_baseline"]
+        valor_referencia = datos["baselines"][mejor]["captura_saldo_curado_top_20_pct"]
+        for modelo in datos["modelos"].values():
+            self.assertAlmostEqual(
+                modelo["uplift_vs_mejor_baseline_pp"],
+                modelo["captura_saldo_curado_top_20_pct"] - valor_referencia,
+                places=5,
+            )
 
 
 if __name__ == "__main__":

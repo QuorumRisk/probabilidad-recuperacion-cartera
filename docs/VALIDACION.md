@@ -9,8 +9,9 @@
 | Reentrenamiento | 2019–2021 | Ajustar los dos candidatos finales |
 | **Test final** | **2022** | Reportar resultados; no reoptimizar parámetros |
 
-Las fechas no solo están separadas por cosecha. **Todas las originaciones
-son en enero y las decisiones de cada cosecha ocurren de abril a septiembre**.
+Las fechas no solo están separadas por cosecha. **Las originaciones son el
+1 de enero de cada cosecha (2019, 2020, 2021 y 2022), y sus decisiones
+ocurren de abril a septiembre de ese mismo año**.
 Las etiquetas terminan entre julio y diciembre del mismo año, de manera
 que ningún desenlace de entrenamiento llega al año siguiente. Esto evita
 solapar cronológicamente etiquetas con la siguiente fase.
@@ -29,7 +30,23 @@ en `run_demo.py` y las pruebas unitarias comprueban la regla temporal.
    queda congelado y se evalúa 2022. No equivale a una garantía de mejora.
 
 En un proceso productivo haría falta validar múltiples ventanas, intervalos
-de incertidumbre, benchmark de reglas de negocio y gobierno de cambios.
+de incertidumbre, consistencia de reglas de negocio y gobierno de cambios.
+
+## Regla de negocio como benchmark, antes de justificar ML
+
+Se evalúan políticas deterministas, **fijadas antes de ver el desenlace**:
+
+1. `saldo_descendente`: ordenar por saldo principal al cierre de `t`.
+2. `dpd_30_antes_60_desempate_saldo`: ordenar primero los créditos con
+   30 DPD y después los de 60 DPD; dentro de cada grupo, por saldo.
+
+Se aplica a ambas la **misma unidad de comparación** de los candidatos ML:
+seleccionar el **20% de cuentas** y medir la proporción de saldo de cuentas
+que posteriormente curan. Los resultados y el diferencial de cada modelo
+frente a la **mejor** regla simple se incluyen en `reports/metricas.json`,
+`reports/resumen.md` y `reports/figures/valor_incremental.png`. Un diferencial
+positivo es **incremento descriptivo de concentración**, no uplift causal:
+no se modelan acciones de cobranza, costos ni respuesta inducida.
 
 ## Qué se mide y para qué
 
@@ -42,6 +59,7 @@ de incertidumbre, benchmark de reglas de negocio y gobierno de cambios.
 | Precisión y recall con umbral 0,50 | Lectura operativa **ilustrativa**, no umbral óptimo de negocio |
 | Lift por decil | Concentración de cuentas curadas ordenadas por `P(cura)` |
 | Curva de saldo de cuentas que curan | Concentración de exposición al ordenar por `P(cura) × saldo(t)` |
+| Captura top 20% vs. reglas sin ML | ¿Supera el score a ordenar por saldo o 30/60 DPD? |
 
 **Criterio explícito para nombrar un ganador en el informe:** mayor captura
 de saldo de las cuentas que curaron en el **top 20% de cuentas**, ordenadas

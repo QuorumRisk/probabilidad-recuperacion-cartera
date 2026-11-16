@@ -8,7 +8,8 @@
 
 - Una observación es la **primera foto elegible de cada préstamo**.
 - `t` = último día de un mes con historial cerrado y disponible.
-- Para el experimento sintético, todos los préstamos se originan en enero
+- Para el experimento sintético, los préstamos de **cada cosecha** se
+  originan el 1 de enero de **su respectivo año** (2019, 2020, 2021 o 2022)
   y se evalúan como máximo en meses de edad 4–9 (**abril–septiembre**).
 - No se toma más de una decisión por crédito: se evita que múltiples fotos
   correlacionadas inflen artificialmente las métricas.
@@ -16,15 +17,19 @@
 ## 2. Universo elegible en el instante t
 
 1. Crédito con **saldo positivo al cierre de `t`**.
-2. `dias_mora(t)` exactamente **30 o 60**. Estos números son buckets de la
-   simulación (no DPD diarios medidos en una cartera real).
-3. Mínimo **tres cierres previos** disponibles: meses de edad `4..9`.
-4. Existe observación completa de los **tres cierres posteriores**.
+2. `dias_mora(t)` exactamente **30 o 60**. Son buckets de **cuotas
+   impagas equivalentes** y no días exactos desde el primer vencimiento.
+3. **Tres cierres anteriores consecutivos** (`t−3`, `t−2`, `t−1`) con
+   pago, cuota, saldo, fecha y mora no nulos; además de datos observados
+   en la fecha de decisión. Las decisiones van de edad 4 a 9 meses.
+4. **Tres cierres futuros consecutivos** (`t+1`, `t+2`, `t+3`) con mora
+   observada y no nula: los huecos no se presuponen al día ni en mora.
 
 No entran créditos sanos en `t`, ni aquellos en 90/120 DPD en `t`, ni
 registros sin horizonte completo, sin saldo o con clave crédito-mes duplicada.
-Los 120 DPD permanecen absorbentes en el simulador; una política real
-requeriría definir castigos y otros estados terminales por separado.
+El estado de 120 es un bucket superior **no absorbente** en esta simulación:
+una cuenta puede salir de él si abona el monto correspondiente. Una política
+real requeriría definir castigos y otros estados terminales por separado.
 
 ## 3. Target binario y horizonte
 
@@ -54,8 +59,10 @@ permanezca al día al final del horizonte.
 
 ## 4. Censura, exclusiones e indeterminados
 
-Si faltan uno o más de los tres cierres futuros, el préstamo es **no
-etiquetable** y se excluye; jamás se convierte automáticamente en negativo.
+Si faltan uno o más cierres futuros **o si `dias_mora` es `NaN` en cualquiera
+de ellos**, el préstamo es **no etiquetable** y se excluye; jamás se convierte
+automáticamente en negativo. También se excluyen préstamos cuya historia
+anterior carece de tres cierres reales consecutivos y completos.
 En un panel real, prepago, venta de cartera, modificación, reestructuración,
 castigo, fallecimiento o error operativo necesitarían reglas y posiblemente
 análisis de riesgos competitivos. Aquí **no se modelan** esos fenómenos:

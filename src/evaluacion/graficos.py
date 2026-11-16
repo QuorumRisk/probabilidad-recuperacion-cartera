@@ -12,7 +12,7 @@ import numpy as np
 from sklearn.calibration import calibration_curve
 from sklearn.metrics import precision_recall_curve, roc_curve
 
-from src.evaluacion.metricas import curva_valor_capturado, tabla_lift
+from src.evaluacion.metricas import captura_top_20, curva_valor_capturado, tabla_lift
 
 PINO = "#276653"
 DORADO = "#c98c22"
@@ -29,7 +29,14 @@ def _estilo() -> None:
     )
 
 
-def guardar_figuras(y: np.ndarray, predicciones: dict[str, np.ndarray], saldos: np.ndarray, destino: Path) -> None:
+def guardar_figuras(
+    y: np.ndarray,
+    predicciones: dict[str, np.ndarray],
+    saldos: np.ndarray,
+    destino: Path,
+    *,
+    baselines: dict[str, np.ndarray] | None = None,
+) -> None:
     destino.mkdir(parents=True, exist_ok=True)
     _estilo()
     # Discriminación: ROC y precisión-recall (la base de referencia importa).
@@ -81,3 +88,33 @@ def guardar_figuras(y: np.ndarray, predicciones: dict[str, np.ndarray], saldos: 
     ax.legend(fontsize=9)
     fig.savefig(destino / "valor_capturado.png", dpi=170)
     plt.close(fig)
+
+    if baselines is not None:
+        referencia = max(
+            captura_top_20(y, np.zeros(len(y)), saldos, prioridad=orden)
+            for orden in baselines.values()
+        )
+        etiquetas = ["Saldo descendente", "DPD 30→60 (desempate: saldo)"] + [
+            NOMBRES[n] for n in predicciones
+        ]
+        valores = [
+            captura_top_20(y, np.zeros(len(y)), saldos, prioridad=p)
+            for p in baselines.values()
+        ] + [captura_top_20(y, p, saldos) for p in predicciones.values()]
+        colores = ["#a2aba5", "#6d8075"] + [COLORES[n] for n in predicciones]
+        fig, ax = plt.subplots(figsize=(10, 5.4), layout="constrained")
+        barras = ax.barh(etiquetas, valores, color=colores, height=0.62)
+        ax.invert_yaxis()
+        ax.axvline(referencia, ls="--", lw=1.5, color="#485a51", label="Mejor regla simple")
+        for idx, (barra, valor) in enumerate(zip(barras, valores)):
+            sufijo = "" if idx < 2 else f"  (Δ {valor - referencia:+.2f} pp)"
+            ax.text(valor + 0.3, barra.get_y() + barra.get_height() / 2, f"{valor:.2f}%{sufijo}", va="center", fontsize=9)
+        ax.set(
+            title="Saldo de cuentas curadas en top 20% · reglas vs. ML",
+            xlabel="% de saldo que posteriormente curó · simulación, no efectivo cobrado",
+            xlim=(0, min(100, max(valores) + 24)),
+        )
+        ax.grid(axis="x", alpha=0.17)
+        ax.legend(fontsize=9, loc="lower right")
+        fig.savefig(destino / "valor_incremental.png", dpi=170)
+        plt.close(fig)
