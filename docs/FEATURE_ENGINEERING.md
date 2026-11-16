@@ -1,69 +1,37 @@
-# Ingeniería de variables · historia hasta t
+# Variables que construimos con la historia de pagos
 
-## Corte temporal y regla de oro
+El modelo recibe una foto tomada después del cierre del mes de decisión, al que llamamos `t`. Para ese momento ya conocemos el pago, el saldo y el bucket de mora. En `construir_variables` unimos el panel con las decisiones y filtramos `mes_edad <= mes_decision` antes de calcular cualquier agregado. Las ventanas terminan en `t`; no usamos valores futuros ni ventanas centradas.
 
-La foto se toma **después del cierre de `t`**: el pago, saldo y bucket de mora
-de ese mes ya están asentados. La función `construir_variables` une el panel
-con las decisiones y filtra **`mes_edad <= mes_decision` ANTES de calcular
-agregados**. Las ventanas móviles terminan en `t`; no utilizan estadísticas
-centradas ni valores posteriores. La prueba de invariancia modifica filas
-futuras y exige exactamente los mismos predictores.
+Hay una prueba que modifica deliberadamente las filas posteriores y comprueba que los predictores sigan siendo idénticos.
 
-## Bloques y criterio de negocio
+## Qué variables usamos y para qué
 
-| Bloque | Variables concretas | Hipótesis ilustrativa |
-| --- | --- | --- |
-| Origen del contrato | `principal_original`, `plazo_meses`, `tasa_anual`, `grado_riesgo`, `proposito` | Condiciones de partida y segmento |
-| Capacidad de pago | `ingreso_mensual`, `dti_originacion`, `cuota_sobre_ingreso` | Presión de obligaciones sobre liquidez |
-| Exposición al decidir | `saldo_decision`, `ratio_saldo_original`, `mes_edad` | Magnitud y madurez del crédito |
-| Atraso exigible al decidir | `saldo_vencido_decision`, `cuotas_vencidas_equivalentes` | Monto real vencido de la simulación, distinto de solo el bucket |
-| Estado actual | `dias_mora_decision`, `pago_ratio_ultimo_mes` | Severidad y señal reciente de esfuerzo de pago |
-| Dinámica de pagos (3m) | `pago_ratio_media_3m`, `pago_ratio_volatilidad_3m`, `pago_ratio_tendencia_3m` | Persistencia, irregularidad, cambio en pagos |
-| Historial de mora | `meses_en_mora_3m`, `meses_en_mora_6m`, `peor_mora_6m`, `dpd_tendencia_3m` | Frecuencia y dirección del deterioro |
-| Recencia | `recencia_ultimo_al_dia_6m`, `ratio_pago_vs_cuota_6m` | Cuánto hace que estuvo al día y cumplimiento agregado |
+Empezamos por las condiciones del préstamo. `principal_original`, `plazo_meses`, `tasa_anual`, `grado_riesgo` y `proposito` describen el contrato y el segmento de partida. Para poner la cuota en contexto utilizamos `ingreso_mensual`, `dti_originacion` y `cuota_sobre_ingreso`. Así podemos observar la presión de las obligaciones sobre el ingreso.
 
-`recencia_ultimo_al_dia_6m` toma valor **7** si no aparece un mes al día
-en los últimos seis: es una categoría numérica centinela, no una afirmación
-de que llevaba siete meses sin pagar. El pago sobre cuota puede superar 1
-si el simulador observa abonos superiores a la cuota.
+El tamaño de la exposición al decidir se representa con `saldo_decision`, `ratio_saldo_original` y `mes_edad`. A eso sumamos `saldo_vencido_decision` y `cuotas_vencidas_equivalentes`, porque el monto vencido de la simulación aporta algo que el bucket de mora por sí solo no cuenta.
 
-## Política de anti-fuga
+La situación actual está en `dias_mora_decision` y `pago_ratio_ultimo_mes`. Para mirar cómo venía pagando la cuenta calculamos `pago_ratio_media_3m`, `pago_ratio_volatilidad_3m` y `pago_ratio_tendencia_3m`. Buscamos distinguir pagos persistentes, irregulares y cambios recientes.
 
-**Permitido:** columnas contractuales desde originación y desempeño
-acumulado/observado **solo hasta `t`**. Los valores `saldo_decision` y
-`saldo_vencido_cierre` son legítimos porque se conocen al cerrar el mes;
-el segundo se renombra en la foto de decisión. Para entrar en el universo
-se exigen tres cierres previos **consecutivos y con datos no nulos**; la
-ausencia de un mes no se reemplaza por el mes vecino.
+El historial de atrasos se resume con `meses_en_mora_3m`, `meses_en_mora_6m`, `peor_mora_6m` y `dpd_tendencia_3m`. Finalmente, `recencia_ultimo_al_dia_6m` y `ratio_pago_vs_cuota_6m` ayudan a describir cuánto hace que la cuenta estuvo al día y cómo se comportan los pagos frente a las cuotas.
 
-**Excluido como predictor:**
+En `recencia_ultimo_al_dia_6m` usamos el valor 7 cuando no aparece un mes al día en los últimos seis. Es un centinela numérico, no una afirmación de que el cliente lleve siete meses sin pagar. El ratio entre pago y cuota puede superar 1 si el simulador registra un abono mayor que la cuota.
 
-- **Todas las filas después de `t`**, cualquiera que sea su campo: mora,
-  pagos, saldo, estado, fecha y derivados; únicamente se consultan al
-  generar `Y_i(t)`.
-- `label_cura_3m` y `saldo_cura_observado` (conocidos solo a posteriori).
-- `loan_id`, `fecha_decision`, `cosecha` (metadatos para corte y validación;
-  no son variables del estimador). El `mes_edad` sí es un predictor histórico.
-- Shock aleatorio y resiliencia latente: existen dentro del generador,
-  pero **no se exportan al panel**.
-- Todo campo arbitrario que alguien agregue al CSV: los modelos consumen
-  únicamente `COLUMNAS_MODELO` desde `src/features/construccion.py`.
+## Dónde cortamos para evitar fugas
 
-## El generador NO es una estimación de una cartera real
+El modelo puede usar las condiciones del contrato desde la originación y el desempeño conocido hasta `t`. `saldo_decision` y `saldo_vencido_cierre` están disponibles al terminar ese mes; el segundo se renombra en la foto de decisión. Para aceptar una cuenta exigimos tres cierres anteriores consecutivos, completos y con datos no nulos. Si falta un mes, no lo sustituimos por otro.
 
-El script `src/data/generador.py` usa semilla fija y cuatro cohortes
-de 2.600 créditos cada una; ingresos lognormales acotados, DTI beta acotado,
-grados A–E, principales lognormales, plazo discreto y tasa dependiente del
-grado con ruido. **Los pagos son estocásticos; la mora no se asigna por
-sorteo**. Cada mes: `exigible = atraso_al_inicio + cuota`; tras aplicar
-el pago, `atraso_al_cierre = max(0, exigible − pago)`. El bucket es
-`min(120, 30 × ceil(atraso_al_cierre / cuota))`, con margen numérico para
-redondeos. El de 120 es un tope, **no absorbente**. La función de pago
-depende de contrato, vulnerabilidad, shock mensual y atraso previo; se
-añade en 2022 una tensión macro inventada. Los equivalentes de cuotas
-impagas **no reproducen la antigüedad contractual exacta de un impago**.
-El saldo principal e intereses se aproximan con reglas simplificadas.
+Ninguna fila posterior a `t` entra en los predictores. Eso incluye moras, pagos, saldos, estados, fechas y derivados; solo se consultan después para construir `Y_i(t)`. También quedan fuera `label_cura_3m` y `saldo_cura_observado`, porque dependen del desenlace futuro.
 
-Este panel no tiene estimación paramétrica proveniente de entidades reales
-ni permite concluir qué señales causan curación. El experimento sirve para
-mostrar trazabilidad, prueba de fuga y evaluación de predicciones.
+`loan_id`, `fecha_decision` y `cosecha` se conservan como metadatos para identificar la observación y separar la validación, no como variables del estimador. `mes_edad` sí forma parte de la información histórica. El shock aleatorio y la resiliencia latente existen dentro del generador, pero no se exportan al panel.
+
+Los modelos solo reciben las columnas de la lista positiva `COLUMNAS_MODELO` de `src/features/construccion.py`. Agregar una columna nueva al CSV no la convierte automáticamente en predictor.
+
+## Qué produce el simulador
+
+`src/data/generador.py` usa una semilla fija y cuatro cohortes de 2.600 créditos. Los ingresos se generan con una distribución lognormal acotada, el DTI con una beta acotada, los grados van de A a E, los principales son lognormales, los plazos son discretos y las tasas dependen del grado con algo de ruido.
+
+Los pagos son aleatorios dentro de reglas definidas, pero la mora no se sortea. Cada mes se calcula `exigible = atraso_al_inicio + cuota`. Después de pagar queda `atraso_al_cierre = max(0, exigible − pago)`. El bucket es `min(120, 30 × ceil(atraso_al_cierre / cuota))`, con un pequeño margen para redondeos. El 120 es un tope, no un estado absorbente.
+
+La cantidad pagada depende del contrato, la vulnerabilidad, un shock mensual y el atraso previo. Para 2022 se introduce una tensión macroeconómica inventada. El saldo principal y los intereses siguen reglas simplificadas. Las cuotas impagas equivalentes no reproducen la edad contractual exacta de una obligación vencida.
+
+No usamos parámetros estimados con datos de una institución real. Este panel sirve para enseñar la trazabilidad, las pruebas contra fuga de información y la evaluación del ranking, no para concluir qué variables causan la recuperación de una cartera.

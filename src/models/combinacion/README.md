@@ -1,13 +1,7 @@
-# Modelo 03 · Combinación evaluada
+# Combinación de probabilidades
 
-Combinación lineal de dos probabilidades:
+Aquí juntamos la probabilidad de la logística con la del gradient boosting. La fórmula es `p_comb = w × p_logistica + (1 − w) × p_gradient_boosting`.
 
-`p_comb = w × p_logistica + (1 − w) × p_gradient_boosting`.
+Comparamos los pesos `0.25`, `0.50` y `0.75` usando Brier en la cosecha de validación de 2021. Una vez elegido el peso, se mantiene fijo al evaluar 2022. El resultado de test nunca interviene en esa elección.
 
-Los tres pesos candidatos (`0.25`, `0.50`, `0.75`) se comparan por
-**Brier en la cosecha de validación 2021**. El peso elegido se congela
-antes de estimar 2022. Nunca se usa el desenlace de test para escogerlo.
-
-No hay apilado (stacking) ni otro modelo entrenado con predicciones de
-test. **La combinación puede perder** frente a cualquiera de sus partes.
-Su comparación completa figura en `reports/metricas.json`.
+No entrenamos un modelo adicional de stacking ni usamos predicciones de test para ajustar la mezcla. La combinación puede rendir peor que cualquiera de sus componentes. La comparación completa queda en `reports/metricas.json`.

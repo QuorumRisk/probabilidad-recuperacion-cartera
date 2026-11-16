@@ -1,80 +1,39 @@
-# Definición del target · curación de mora en tres meses
+# Cómo definimos el resultado que queremos anticipar
 
-> Definición **ilustrativa** sobre un panel sintético. En producción, la
-> definición se valida con responsables de Riesgo, Cobranza, Contabilidad y
-> Operaciones antes de escribir una sola línea de modelado.
+Este documento describe el target del panel sintético. En un trabajo con datos reales lo acordaríamos primero con Riesgo, Cobranza, Contabilidad y Operaciones. La definición no se decide únicamente desde el equipo que entrena el modelo.
 
-## 1. Unidad y fecha de decisión
+## La cuenta y el momento de decisión
 
-- Una observación es la **primera foto elegible de cada préstamo**.
-- `t` = último día de un mes con historial cerrado y disponible.
-- Para el experimento sintético, los préstamos de **cada cosecha** se
-  originan el 1 de enero de **su respectivo año** (2019, 2020, 2021 o 2022)
-  y se evalúan como máximo en meses de edad 4–9 (**abril–septiembre**).
-- No se toma más de una decisión por crédito: se evita que múltiples fotos
-  correlacionadas inflen artificialmente las métricas.
+Tomamos una sola observación por préstamo: la primera vez que cumple las condiciones para entrar al ejercicio. El momento `t` es el último día de un mes cuyo historial ya está cerrado y disponible. Usar varias fotos de la misma cuenta como si fueran independientes podría inflar las métricas.
 
-## 2. Universo elegible en el instante t
+Los préstamos simulados nacen el 1 de enero de su respectivo año, 2019, 2020, 2021 o 2022. Las decisiones se toman entre los meses de edad 4 y 9, es decir, entre abril y septiembre de cada cosecha.
 
-1. Crédito con **saldo positivo al cierre de `t`**.
-2. `dias_mora(t)` exactamente **30 o 60**. Son buckets de **cuotas
-   impagas equivalentes** y no días exactos desde el primer vencimiento.
-3. **Tres cierres anteriores consecutivos** (`t−3`, `t−2`, `t−1`) con
-   pago, cuota, saldo, fecha y mora no nulos; además de datos observados
-   en la fecha de decisión. Las decisiones van de edad 4 a 9 meses.
-4. **Tres cierres futuros consecutivos** (`t+1`, `t+2`, `t+3`) con mora
-   observada y no nula: los huecos no se presuponen al día ni en mora.
+## Qué cuentas entran
 
-No entran créditos sanos en `t`, ni aquellos en 90/120 DPD en `t`, ni
-registros sin horizonte completo, sin saldo o con clave crédito-mes duplicada.
-El estado de 120 es un bucket superior **no absorbente** en esta simulación:
-una cuenta puede salir de él si abona el monto correspondiente. Una política
-real requeriría definir castigos y otros estados terminales por separado.
+En el cierre `t` la cuenta debe tener saldo positivo y un `dias_mora` de 30 o 60. Son buckets calculados con cuotas impagas equivalentes, no días exactos transcurridos desde la primera obligación vencida.
 
-## 3. Target binario y horizonte
+También pedimos tres cierres anteriores consecutivos (`t−3`, `t−2` y `t−1`). Deben existir los datos de pago, cuota, saldo, fecha y mora, además de los campos observados al decidir. Para conocer el resultado hacen falta los tres cierres posteriores (`t+1`, `t+2` y `t+3`), igualmente consecutivos y con mora no nula.
 
-El evento positivo es **curación contractual**:
+No incluimos cuentas sanas al corte ni cuentas en 90 o 120 DPD. Tampoco entran registros sin saldo, con meses faltantes o con la misma clave crédito-mes duplicada. En el simulador, 120 es el bucket superior pero no un estado absorbente: una cuenta puede salir de ahí si paga lo necesario. En una cartera real habría que definir por separado castigos y otros estados terminales.
 
-`Y_i(t) = 1` si existe `k ∈ {1,2,3}` tal que `dias_mora_i(t+k) = 0`.
+## Qué significa que una cuenta vuelva al día
 
-`Y_i(t) = 0` si ninguno de los tres cierres posteriores muestra cero DPD.
+El evento positivo es `Y_i(t) = 1` cuando existe algún `k ∈ {1,2,3}` para el cual `dias_mora_i(t+k) = 0`. Si ninguno de los tres cierres posteriores llega a cero, la etiqueta es `Y_i(t) = 0`.
 
-El horizonte es de **tres cierres mensuales** y comienza **después** de la
-fecha de decisión. Una mejora de 60 a 30 DPD no es curación. Una cuenta que
-cura en `t+1` y reincide en `t+3` se marca positiva: es curación *alguna
-vez*, no curación sostenida. Este matiz debe discutirse en negocio.
+La ventana empieza después de la decisión y dura tres cierres mensuales. Bajar de 60 a 30 DPD es una mejora, pero no cuenta como volver al día. Y si una cuenta llega a cero en `t+1` y vuelve a atrasarse en `t+3`, queda positiva: aquí medimos si se puso al día alguna vez dentro del horizonte, no si permaneció así. Es una distinción que tendríamos que discutir con el negocio.
 
-La construcción utiliza `dias_mora(t+1..t+3)` **únicamente en la función
-que crea la etiqueta**. Ningún campo posterior a `t` alimenta el modelo.
+Un ejemplo ayuda. Supongamos que una cuenta tuvo mora 0 en `t−2`, 30 en `t−1` y 60 al decidir en `t`. Luego registra 60 en `t+1`, 0 en `t+2` y 30 en `t+3`. Su etiqueta es 1 porque estuvo al día en `t+2`, aunque haya reincidido. Los datos de `t−2` y `t−1` son historia observada; el límite de las variables del modelo es `t`. Los meses posteriores solo sirven para construir la etiqueta.
 
-### Ejemplo temporal
+En el código, `dias_mora(t+1..t+3)` se consulta únicamente al etiquetar. Ningún campo posterior a `t` entra en los predictores.
 
-| Mes | `t−2` | `t−1` | `t` (decisión) | `t+1` | `t+2` | `t+3` |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| Mora | 0 | 30 | **60** | 60 | **0** | 30 |
-| Uso | Observado | Observado | **Feature máxima** | Label | Label | Label |
+## Qué hacemos si falta información
 
-Etiqueta: **1** porque se observa 0 DPD en `t+2`; no es condición que
-permanezca al día al final del horizonte.
+Una cuenta sin los tres cierres futuros, o con `dias_mora` en `NaN` en cualquiera de ellos, no puede etiquetarse. Se excluye, nunca se trata automáticamente como un caso negativo. Lo mismo ocurre si no tiene los tres cierres anteriores completos y consecutivos.
 
-## 4. Censura, exclusiones e indeterminados
+El panel de prueba mantiene doce cierres por préstamo. No modela venta de cartera, prepago, reestructuración, modificación, castigo, fallecimiento o errores operativos. Con datos reales esas situaciones necesitarían reglas propias y posiblemente un análisis de riesgos competitivos.
 
-Si faltan uno o más cierres futuros **o si `dias_mora` es `NaN` en cualquiera
-de ellos**, el préstamo es **no etiquetable** y se excluye; jamás se convierte
-automáticamente en negativo. También se excluyen préstamos cuya historia
-anterior carece de tres cierres reales consecutivos y completos.
-En un panel real, prepago, venta de cartera, modificación, reestructuración,
-castigo, fallecimiento o error operativo necesitarían reglas y posiblemente
-análisis de riesgos competitivos. Aquí **no se modelan** esos fenómenos:
-el panel sintético mantiene doce cierres por préstamo.
+## Cómo interpretamos el saldo capturado
 
-## 5. Qué significa valor capturado
+Usamos `saldo_curado_i = saldo_i(t) × Y_i(t)`. Es la exposición que tenía la cuenta al decidir, siempre que después haya llegado a cero DPD. No son pesos efectivamente cobrados ni valor contable realizado.
 
-`saldo_curado_i = saldo_i(t) × Y_i(t)`.
-
-Este indicador es **exposición a la fecha de decisión en cuentas que
-posteriormente llegaron a cero DPD**. NO es efectivo recuperado ni valor
-contable realizado. La priorización por `p_i × saldo_i(t)` es una proxy
-de valor esperado simple; en una operación real se incorporan monto de
-cuotas vencidas, severidad, costos, probabilidad incremental de respuesta,
-recovery cash-flow y restricciones de contacto.
+Para priorizar se utiliza `p_i × saldo_i(t)` como aproximación sencilla al valor esperado. En un encargo real entrarían el monto vencido, la severidad, los costos de gestión, la probabilidad de respuesta incremental, los flujos de recuperación y las restricciones de contacto.
